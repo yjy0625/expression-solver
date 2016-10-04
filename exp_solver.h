@@ -81,7 +81,7 @@ private:
 	
 	// This is similar to lexical analysis in a compiler
 	// Partition an expression into blocks of different types
-	void groupExp(string exp);
+	bool groupExp(string exp);
 	
 	// Analyze whether a string Block is of BlockType Func, Constant or Var
 	BlockType analyzeStrType(string str);

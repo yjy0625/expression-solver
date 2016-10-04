@@ -36,21 +36,29 @@ string ExpSolver::solveExp(string exp) {
 	// Discard all spaces in the expression
 	exp = discardSpaces(exp);
 	
+	// Whether to cancel calculation because of error
+	bool canPerformCalculation = true;
+	
 	// Find out if the expression includes variable declaration
 	bool isDeclaration = false;
 	string newVarName = "";
 	bool declarationValid = checkDeclaration(exp, newVarName, isDeclaration);
 	if(!declarationValid) {
-		string output = "Calculation aborted. ";
-		return output;
+		canPerformCalculation = false;
 	}
 	
 	// Group the expression into substrings
 	// and calculate the bracket level of each substring
-	groupExp(exp);
-
+	bool groupSucceed = groupExp(exp);
+	if(!groupSucceed) {
+		canPerformCalculation = false;
+	}
+	
 	// Recursively solve the expression
-	Value result = calculateExp(exp, 0, blocks.size());
+	Value result;
+	if(canPerformCalculation) {
+		result = calculateExp(exp, 0, blocks.size());
+	}
 	
 	// Create output string
 	string output;
@@ -65,8 +73,8 @@ string ExpSolver::solveExp(string exp) {
 				if(newVarName.compare(constants[i].name) == 0) {
 					variableCanBeDeclared = false;
 					cerr << "Constant \"" << newVarName << "\" cannot be declared! ";
-					output = "Calculation aborted. ";
-					return output;
+					blocks.clear();
+					return "Calculation aborted. ";
 				}
 			}
 			
@@ -96,7 +104,8 @@ string ExpSolver::solveExp(string exp) {
 		}
 	}
 	else {
-		output = "Calculation aborted. ";
+		blocks.clear();
+		return "Calculation aborted. ";
 	}
 	
 	// Clean up
@@ -169,7 +178,7 @@ bool ExpSolver::checkDeclaration(string &exp, string &newVarName, bool &isDec) {
 
 // This is similar to lexical analysis in a compiler
 // Partition an expression into blocks of different types
-void ExpSolver::groupExp(string exp) {
+bool ExpSolver::groupExp(string exp) {
 	// Initialize a new block that is expected to be pushed 
 	// into the stack
 	Block newBlock;
@@ -198,6 +207,7 @@ void ExpSolver::groupExp(string exp) {
 			// Label string as function, constant or variable
 			if(currentType == Func) {
 				currentType = analyzeStrType(exp.substr(start, i-start));
+				if(currentType == Nil) return false;
 			}
 			
 			// Push new block into stack
@@ -221,7 +231,12 @@ void ExpSolver::groupExp(string exp) {
 	
 	// Throw error if brackets are not paired
 	// (diagonized by inspecting variable level)
-	if(level != 0) cerr << "Syntax error: Brackets not paired! ";
+	if(level != 0) {
+		cerr << "Syntax error: Brackets not paired! ";
+		return false;
+	}
+	
+	return true;
 }
 
 // Analyze whether a string Block is of BlockType Func, Constant or Var
@@ -235,7 +250,7 @@ BlockType ExpSolver::analyzeStrType(string str) {
 	for(int i = 0; i < variables.size(); i++) {
 		if(str.compare(variables[i].name) == 0) return Var;
 	}
-	cerr << "Syntax error: String \"" + str + "\" not recognized! ";
+	cerr << "String \"" + str + "\" not recognized! ";
 	return Nil;
 }
 
@@ -254,7 +269,7 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 	// Output error and return if expression contains nothing
 	if(exp.substr(blocks[startBlock].start,
 		blocks[endBlock-1].end-blocks[startBlock].start) == "") {
-		cerr << "Syntax error: Invalid expression! ";
+		cerr << "Invalid expression! ";
 		return Value();
 	}
 	
@@ -262,18 +277,20 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 	bool negativeSignBeforeNumber = false;
 	if(exp[blocks[startBlock].start] == '-') {
 		if(endBlock <= startBlock+1) {
-			cerr << "Syntax error: Invalid expression! ";
+			cerr << "Invalid expression! ";
 			return Value();
 		}
 		else if(blocks[startBlock+1].type == BracL) {
-			return Value(-1)*calculateExp(exp,startBlock+1, endBlock);
+			Value negOfValue = calculateExp(exp,startBlock+1, endBlock);
+			if(!negOfValue.getCalculability()) return Value();
+			return Value(-1)*negOfValue;
 		}
 		else if(blocks[startBlock+1].type == Num) {
 			// Leaves the negative sign before number case to later
 			negativeSignBeforeNumber = true;
 		}
 		else {
-			cerr << "Syntax error: Invalid expression! ";
+			cerr << "Invalid expression! ";
 			return Value();
 		}
 	}
@@ -352,15 +369,23 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 			if(corBlock != 0 && blocks[corBlock-1].type == Func) {
 				// Find the function and calculate the result of the function.
 				double (*funcToUse)(double);
+				string funcName = exp.substr(blocks[corBlock-1].start, 
+					blocks[corBlock-1].end-blocks[corBlock-1].start);
 				for(int i = 0; i < functions.size(); i++) {
-					string contentToCompare = 
-						exp.substr(blocks[corBlock-1].start, blocks[corBlock-1].end-blocks[corBlock-1].start);
-					if(contentToCompare.compare(functions[i].name) == 0) {
+					if(funcName.compare(functions[i].name) == 0) {
 						funcToUse = functions[i].func;
 						break;
 					}
 				}
-				double funcResult = (*funcToUse)(calculateExp(exp, corBlock+1, i).getDecValue());
+				Value valueInFunc = calculateExp(exp, corBlock+1, i);
+				if(!valueInFunc.getCalculability()) {
+					return Value();
+				}
+				else if(valueInFunc.getDecValue() < 0 && funcName.compare("sqrt") == 0) {
+					cerr << "Arithmatic error: Cannot square root a negative number! ";
+					return Value();
+				}
+				double funcResult = (*funcToUse)(valueInFunc.getDecValue());
 				
 				// Convert to Value and push to stack.
 				Value newValue = Value(funcResult);
@@ -369,7 +394,11 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 				iIncrement -= i - corBlock + 1;
 			}
 			else {
-				values.push(calculateExp(exp, corBlock+1, i));
+				Value valueToPush = calculateExp(exp, corBlock+1, i);
+				if(!valueToPush.getCalculability()) {
+					return Value();
+				}
+				values.push(valueToPush);
 				iIncrement -= i - corBlock;
 			}
 		}
@@ -381,7 +410,7 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 			// Here '^' can be calculated
 			if(blockStr[0] == '*' || blockStr[0] == '/') {
 				if(values.size() != ops.size()+1) {
-					cerr << "Syntax error: Expression invalid! ";
+					cerr << "Invalid expression! ";
 					return Value();
 				}
 				while(!ops.empty()) {
@@ -402,7 +431,7 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 			// Here '^' '*' '/' can be calculated
 			else if(blockStr[0] == '+' || blockStr[0] == '-') {
 				if(values.size() != ops.size()+1) {
-					cerr << "Syntax error: Expression invalid! ";
+					cerr << "Invalid expression! ";
 					return Value();
 				}
 				while(!ops.empty()) {
@@ -432,7 +461,7 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 	
 	// Final calculation not containing any bracket
 	if(values.size() != ops.size()+1) {
-		cerr << "Syntax error: Expression invalid! ";
+		cerr << "Invalid expression! ";
 		return Value();
 	}
 	while(!ops.empty()) {
@@ -447,9 +476,8 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 		else if(lastOp == '^') values.push(powv(op1,op2));
 	}
 	if(values.size() > 1) {
-		cerr << "Syntax error: Invalid expression! ";
-		Value ret = Value();
-		return ret;
+		cerr << "Invalid expression! ";
+		return Value();
 	}
 	
 	// Record return value
