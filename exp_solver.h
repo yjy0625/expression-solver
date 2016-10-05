@@ -3,8 +3,7 @@
 exp_solver.h
 
 Author: Jingyun Yang
-Date First Created: 1/16/15
-Date Last Modified: 10/2/16
+Date Created: 1/16/15
 
 Description: Header file for ExpSolver class
 that takes in algebraic expressions as strings
@@ -89,6 +88,9 @@ private:
 	// Determine the type of one single character
 	BlockType charType(char c);
 	
+	// Replace every "-" as negative sign by "0-"
+	void dealWithNegativeSign(string &exp);
+
 	// Calculate expression in block range [startBlock,endBlock)
 	Value calculateExp(string exp, int startBlock, int endBlock);
 	

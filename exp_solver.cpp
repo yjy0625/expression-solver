@@ -3,8 +3,7 @@
 exp_solver.cpp
 
 Author: Jingyun Yang
-Date First Created: 1/16/15
-Date Last Modified: 10/2/16
+Date Created: 1/16/15
 
 Description: Implementation file for ExpSolver 
 class that takes in algebraic expressions as 
@@ -36,29 +35,35 @@ string ExpSolver::solveExp(string exp) {
 	// Discard all spaces in the expression
 	exp = discardSpaces(exp);
 	
-	// Whether to cancel calculation because of error
-	bool canPerformCalculation = true;
-	
 	// Find out if the expression includes variable declaration
 	bool isDeclaration = false;
 	string newVarName = "";
 	bool declarationValid = checkDeclaration(exp, newVarName, isDeclaration);
 	if(!declarationValid) {
-		canPerformCalculation = false;
+		blocks.clear();
+		return "Calculation aborted. ";
 	}
+	
+	// Deal with no right-hand-side input
+	if(exp.length() == 0) {
+		cerr << "Invalid expression! ";
+		blocks.clear();
+		return "Calculation aborted. ";
+	}
+	
+	// Deal with negative signs in the expression
+	dealWithNegativeSign(exp);
 	
 	// Group the expression into substrings
 	// and calculate the bracket level of each substring
 	bool groupSucceed = groupExp(exp);
 	if(!groupSucceed) {
-		canPerformCalculation = false;
+		blocks.clear();
+		return "Calculation aborted. ";
 	}
 	
 	// Recursively solve the expression
-	Value result;
-	if(canPerformCalculation) {
-		result = calculateExp(exp, 0, blocks.size());
-	}
+	Value result = calculateExp(exp, 0, blocks.size());
 	
 	// Create output string
 	string output;
@@ -264,36 +269,20 @@ BlockType ExpSolver::charType(char c) {
 	else return Nil;
 }
 
+// Replace every "-" as negative sign by "0-"
+void ExpSolver::dealWithNegativeSign(string &exp) {
+	if(exp.length() > 0 && exp[0] == '-') {
+		exp = '0' + exp;
+	}
+	for(int i = 1; i < exp.length(); i++) {
+		if(exp[i] == '-' && exp[i-1] == '(') {
+			exp = exp.substr(0,i) + '0' + exp.substr(i);
+		}
+	}
+}
+
 // Calculate expression in block range [startBlock,endBlock)
 Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
-	// Output error and return if expression contains nothing
-	if(exp.substr(blocks[startBlock].start,
-		blocks[endBlock-1].end-blocks[startBlock].start) == "") {
-		cerr << "Invalid expression! ";
-		return Value();
-	}
-	
-	// 1st place that deals with negative signs
-	bool negativeSignBeforeNumber = false;
-	if(exp[blocks[startBlock].start] == '-') {
-		if(endBlock <= startBlock+1) {
-			cerr << "Invalid expression! ";
-			return Value();
-		}
-		else if(blocks[startBlock+1].type == BracL) {
-			Value negOfValue = calculateExp(exp,startBlock+1, endBlock);
-			if(!negOfValue.getCalculability()) return Value();
-			return Value(-1)*negOfValue;
-		}
-		else if(blocks[startBlock+1].type == Num) {
-			// Leaves the negative sign before number case to later
-			negativeSignBeforeNumber = true;
-		}
-		else {
-			cerr << "Invalid expression! ";
-			return Value();
-		}
-	}
 	
 	// Create stacks that stores operands and operators
 	stack<Value> values;
@@ -310,17 +299,7 @@ Value ExpSolver::calculateExp(string exp, int startBlock, int endBlock) {
 		
 		// Push numbers to stack
 		if(blocks[i].type == Num) {
-			// 2nd place that deals with negative signs
-			// Resolve the negative sign before number issue
-			if(negativeSignBeforeNumber && i == startBlock+1) {
-				values.push(Value(blockStr));
-				ops.push('-');
-				values.push(Value(0));
-				break;
-			}
-			else {
-				values.push(Value(blockStr));
-			}
+			values.push(Value(blockStr));
 		}
 		
 		// Throw error if function names occur without brackets
